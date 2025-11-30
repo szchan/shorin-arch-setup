@@ -6,8 +6,6 @@ breeze5
 brightnessctl
 cava
 cliphist
-clipse
-clipse-gui
 eza
 swaylock-effects
 swayidle

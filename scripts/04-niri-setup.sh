@@ -106,40 +106,60 @@ echo "$TARGET_USER ALL=(ALL) NOPASSWD: ALL" > "$SUDO_TEMP_FILE"
 chmod 440 "$SUDO_TEMP_FILE"
 
 # ------------------------------------------------------------------------------
-# 4. Install Dependencies from List
+# 4. Install Dependencies (Split Strategy)
 # ------------------------------------------------------------------------------
 log "Step 4/9: Installing dependencies from niri-applist.txt..."
 
 LIST_FILE="$PARENT_DIR/niri-applist.txt"
 
 if [ -f "$LIST_FILE" ]; then
-    # Added tr -d '\r' to fix potential Windows line endings
     mapfile -t PACKAGE_ARRAY < <(grep -vE "^\s*#|^\s*$" "$LIST_FILE" | tr -d '\r')
     
     if [ ${#PACKAGE_ARRAY[@]} -gt 0 ]; then
-        CLEAN_LIST=""
+        BATCH_LIST=""
+        GIT_LIST=()
+
+        # 分类逻辑：Git包进数组，普通包进字符串
         for pkg in "${PACKAGE_ARRAY[@]}"; do
-            if [ "$pkg" == "imagemagic" ]; then
-                log "-> [Auto-Fix] Correcting typo 'imagemagic' to 'imagemagick'..."
-                pkg="imagemagick"
+            # 自动纠错
+            if [ "$pkg" == "imagemagic" ]; then pkg="imagemagick"; fi
+            
+            # 判断是否以 -git 结尾
+            if [[ "$pkg" == *"-git" ]]; then
+                GIT_LIST+=("$pkg")
+            else
+                BATCH_LIST+="$pkg "
             fi
-            CLEAN_LIST+="$pkg "
         done
         
-        log "-> Attempting batch installation..."
-        if runuser -u "$TARGET_USER" -- yay -S --noconfirm --needed --answerdiff=None --answerclean=None $CLEAN_LIST; then
-            success "All dependencies installed successfully (Batch mode)."
-        else
-            warn "Batch installation failed. Switching to One-by-One mode..."
-            for pkg in $CLEAN_LIST; do
-                if runuser -u "$TARGET_USER" -- yay -S --noconfirm --needed --answerdiff=None --answerclean=None "$pkg"; then
-                    :
+        # --- 阶段 1: 批量安装普通包 ---
+        if [ -n "$BATCH_LIST" ]; then
+            log "-> [Batch] Installing standard repository packages..."
+            if runuser -u "$TARGET_USER" -- yay -S --noconfirm --needed --answerdiff=None --answerclean=None $BATCH_LIST; then
+                success "Standard packages installed."
+            else
+                warn "Batch install had issues. Attempting one-by-one fallback for standard packages..."
+                for pkg in $BATCH_LIST; do
+                    runuser -u "$TARGET_USER" -- yay -S --noconfirm --needed --answerdiff=None --answerclean=None "$pkg"
+                done
+            fi
+        fi
+
+        # --- 阶段 2: 逐个安装 Git 包 ---
+        if [ ${#GIT_LIST[@]} -gt 0 ]; then
+            log "-> [Slow] Installing ${#GIT_LIST[@]} '-git' packages individually (compilation may take time)..."
+            for git_pkg in "${GIT_LIST[@]}"; do
+                log "-> Compiling/Installing: $git_pkg ..."
+                if runuser -u "$TARGET_USER" -- yay -S --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
+                    success "Installed: $git_pkg"
                 else
-                    error "Failed to install '$pkg'. Skipping."
+                    error "Failed to install: $git_pkg (Check logs for compilation errors)."
+                    # 不退出脚本，继续装下一个
                 fi
             done
-            success "Dependency installation process finished."
         fi
+        
+        success "Dependency installation phase completed."
     else
         warn "niri-applist.txt is empty."
     fi
@@ -157,7 +177,6 @@ TEMP_DIR="/tmp/shorin-repo"
 rm -rf "$TEMP_DIR"
 
 log "-> Cloning repository..."
-# Clone as user
 runuser -u "$TARGET_USER" -- git clone "$REPO_URL" "$TEMP_DIR"
 
 if [ -d "$TEMP_DIR/dotfiles" ]; then
@@ -166,11 +185,7 @@ if [ -d "$TEMP_DIR/dotfiles" ]; then
     runuser -u "$TARGET_USER" -- tar -czf "$HOME_DIR/$BACKUP_NAME" -C "$HOME_DIR" .config
     
     log "-> Applying new dotfiles..."
-    
-    # [FIXED] Copy AS THE USER so permissions are correct naturally.
-    # No need to chown -R the whole home directory later.
     runuser -u "$TARGET_USER" -- cp -rf "$TEMP_DIR/dotfiles/." "$HOME_DIR/"
-    
     success "Dotfiles applied."
 else
     error "Directory 'dotfiles' not found in cloned repo."
@@ -183,9 +198,7 @@ log "Step 6/9: Setting up Wallpapers..."
 WALL_DEST="$HOME_DIR/Pictures/Wallpapers"
 
 if [ -d "$TEMP_DIR/wallpapers" ]; then
-    # Create dir as user
     runuser -u "$TARGET_USER" -- mkdir -p "$WALL_DEST"
-    # Copy as user
     runuser -u "$TARGET_USER" -- cp -rf "$TEMP_DIR/wallpapers/." "$WALL_DEST/"
     success "Wallpapers installed."
 fi
@@ -251,7 +264,6 @@ EOT
     ln -sf "../niri-autostart.service" "$WANTS_DIR/niri-autostart.service"
 
     # 9.4 Permission Fix
-    # Only fixing ownership for .config is safe and necessary because we wrote files as root above
     chown -R "$TARGET_USER:$TARGET_USER" "$HOME_DIR/.config"
     
     success "TTY Auto-login configured."
