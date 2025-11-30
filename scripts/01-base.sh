@@ -1,69 +1,70 @@
 #!/bin/bash
 
-# 获取当前脚本所在目录，以便引用 utils
+# Get script directory to source utils
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/00-utils.sh"
 
-# 检查权限
 check_root
 
-log ">>> 开始执行阶段 1：基础系统环境配置"
+log ">>> Starting Phase 1: Base System Configuration"
 
 # ------------------------------------------------------------------------------
-# 1. 设置全局默认编辑器
+# 1. Set Global Default Editor
 # ------------------------------------------------------------------------------
-log "步骤 1/5: 配置全局默认编辑器..."
+log "Step 1/5: Configuring global default editor..."
 
 TARGET_EDITOR="vim"
 
 if command -v nvim &> /dev/null; then
     TARGET_EDITOR="nvim"
-    log "-> 检测到 Neovim"
+    log "-> Neovim detected."
 elif command -v nano &> /dev/null; then
     TARGET_EDITOR="nano"
-    log "-> 检测到 Nano"
+    log "-> Nano detected."
 else
-    log "-> 未检测到 Nvim 或 Nano，正在安装 Vim..."
+    log "-> Neovim or Nano not found. Installing Vim..."
     if ! command -v vim &> /dev/null; then
         pacman -S --noconfirm vim > /dev/null 2>&1
     fi
 fi
 
+# Modify /etc/environment
 if grep -q "^EDITOR=" /etc/environment; then
     sed -i "s/^EDITOR=.*/EDITOR=${TARGET_EDITOR}/" /etc/environment
 else
     echo "EDITOR=${TARGET_EDITOR}" >> /etc/environment
 fi
-success "全局编辑器已设置为: ${TARGET_EDITOR}"
+success "Global EDITOR set to: ${TARGET_EDITOR}"
 
 # ------------------------------------------------------------------------------
-# 2. 开启 32 位源
+# 2. Enable 32-bit (multilib) Repository
 # ------------------------------------------------------------------------------
-log "步骤 2/5: 检查 32 位源 [multilib]..."
+log "Step 2/5: Checking [multilib] 32-bit repository..."
 
 if grep -q "^\[multilib\]" /etc/pacman.conf; then
-    success "[multilib] 已经开启。"
+    success "[multilib] is already enabled."
 else
+    # Uncomment [multilib] and the following Include line
     sed -i "/\[multilib\]/,/Include/"'s/^#//' /etc/pacman.conf
-    log "-> 已取消注释，正在刷新数据库..."
+    log "-> Uncommented [multilib]. Refreshing pacman database..."
     pacman -Sy > /dev/null 2>&1
-    success "[multilib] 已开启并刷新。"
+    success "[multilib] enabled and refreshed."
 fi
 
 # ------------------------------------------------------------------------------
-# 3. 安装基础字体
+# 3. Install Base Fonts
 # ------------------------------------------------------------------------------
-log "步骤 3/5: 安装基础字体..."
+log "Step 3/5: Installing base fonts (wqy-zenhei, noto-fonts, emoji)..."
 pacman -S --noconfirm --needed wqy-zenhei noto-fonts noto-fonts-emoji > /dev/null 2>&1
-success "字体安装完成。"
+success "Base fonts installed."
 
 # ------------------------------------------------------------------------------
-# 4. archlinuxcn 源
+# 4. Configure archlinuxcn Repository
 # ------------------------------------------------------------------------------
-log "步骤 4/5: 配置 archlinuxcn 源..."
+log "Step 4/5: Configuring archlinuxcn repository..."
 
 if grep -q "\[archlinuxcn\]" /etc/pacman.conf; then
-    success "archlinuxcn 源已存在。"
+    success "archlinuxcn repository already exists."
 else
     cat <<EOT >> /etc/pacman.conf
 
@@ -73,18 +74,18 @@ Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxcn/\$arch
 Server = https://mirrors.hit.edu.cn/archlinuxcn/\$arch
 Server = https://repo.huaweicloud.com/archlinuxcn/\$arch
 EOT
-    log "-> 已写入配置文件。"
+    log "-> Added mirror servers to pacman.conf."
 fi
 
-log "-> 安装 archlinuxcn-keyring..."
+log "-> Installing archlinuxcn-keyring..."
 pacman -Sy --noconfirm archlinuxcn-keyring > /dev/null 2>&1
-success "archlinuxcn 配置完成。"
+success "archlinuxcn configured successfully."
 
 # ------------------------------------------------------------------------------
-# 5. 安装 AUR 助手
+# 5. Install AUR Helpers
 # ------------------------------------------------------------------------------
-log "步骤 5/5: 安装 yay 和 paru..."
+log "Step 5/5: Installing AUR helpers (yay & paru)..."
 pacman -S --noconfirm --needed yay paru > /dev/null 2>&1
-success "AUR 助手安装完成。"
+success "yay and paru installed."
 
-log ">>> 阶段 1 完成。"
+log ">>> Phase 1 completed."

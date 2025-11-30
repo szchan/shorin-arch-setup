@@ -1,17 +1,17 @@
 #!/bin/bash
 
 # ==============================================================================
-# 00-utils.sh - 公共函数库
+# 00-utils.sh - Utility Functions
 # ==============================================================================
 
-# 颜色定义
+# Color Definitions
 export GREEN='\033[0;32m'
 export BLUE='\033[0;34m'
 export YELLOW='\033[1;33m'
 export RED='\033[0;31m'
 export NC='\033[0m' # No Color
 
-# 日志函数
+# Logging Functions
 log() {
     echo -e "${BLUE}[LOG]${NC} $1"
 }
@@ -28,10 +28,10 @@ error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# 权限检查函数
+# Permission Check
 check_root() {
     if [ "$EUID" -ne 0 ]; then
-        error "请使用 sudo 或 root 权限运行此脚本。"
+        error "Please run this script with sudo or as root."
         exit 1
     fi
 }
