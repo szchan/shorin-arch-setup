@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# 06-kdeplasma-setup.sh - KDE Plasma Setup (Visual Enhanced)
+# 06-kdeplasma-setup.sh - KDE Plasma Setup (Visual Enhanced + Mirror Menu)
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,7 +53,7 @@ exe pacman -Syu --noconfirm --needed $KDE_PKGS
 success "KDE Plasma installed."
 
 # ------------------------------------------------------------------------------
-# 2. Software Store & Network
+# 2. Software Store & Network (Smart Mirror Selection)
 # ------------------------------------------------------------------------------
 section "Step 2/5" "Software Store & Network"
 
@@ -62,24 +62,76 @@ log "Configuring Discover & Flatpak..."
 exe pacman -Syu --noconfirm --needed flatpak flatpak-kcm
 exe flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
+# --- Network Detection Logic ---
+CURRENT_TZ=$(readlink -f /etc/localtime)
 IS_CN_ENV=false
-if [ "$CN_MIRROR" == "1" ] || [ "$DEBUG" == "1" ]; then
+
+if [[ "$CURRENT_TZ" == *"Shanghai"* ]]; then
     IS_CN_ENV=true
-    if [ "$DEBUG" == "1" ]; then warn "DEBUG MODE ACTIVE"; fi
-    
+    info_kv "Region" "China (Timezone)"
+elif [ "$CN_MIRROR" == "1" ]; then
+    IS_CN_ENV=true
+    info_kv "Region" "China (Manual Env)"
+elif [ "$DEBUG" == "1" ]; then
+    IS_CN_ENV=true
+    warn "DEBUG MODE: Forcing China Environment"
+fi
+
+# --- Mirror Configuration ---
+if [ "$IS_CN_ENV" = true ]; then
     log "Enabling China Optimizations..."
     
-    # [MODIFIED] SJTU Mirror + No P2P
-    log "-> Switching Flathub to SJTU Mirror..."
-    exe flatpak remote-modify flathub --url=https://mirror.sjtu.edu.cn/flathub
+    echo ""
+    echo -e "${H_PURPLE}╭──────────────────────────────────────────────────────────────────╮${NC}"
+    echo -e "${H_PURPLE}│${NC} ${BOLD}Select Flathub Mirror (Timeout 60s -> Default SJTU)${NC}              ${H_PURPLE}│${NC}"
+    echo -e "${H_PURPLE}├──────────────────────────────────────────────────────────────────┤${NC}"
+    echo -e "${H_PURPLE}│${NC} ${H_CYAN}[1]${NC} SJTU (Shanghai Jiao Tong Univ) - ${H_GREEN}Recommended${NC}                 ${H_PURPLE}│${NC}"
+    echo -e "${H_PURPLE}│${NC} ${H_CYAN}[2]${NC} TUNA (Tsinghua University)                                   ${H_PURPLE}│${NC}"
+    echo -e "${H_PURPLE}│${NC} ${H_CYAN}[3]${NC} USTC (Univ of Sci & Tech of China)                           ${H_PURPLE}│${NC}"
+    echo -e "${H_PURPLE}│${NC} ${H_CYAN}[4]${NC} BFSU (Beijing Foreign Studies Univ)                          ${H_PURPLE}│${NC}"
+    echo -e "${H_PURPLE}╰──────────────────────────────────────────────────────────────────╯${NC}"
+    echo ""
+    
+    read -t 60 -p "$(echo -e "   ${H_YELLOW}Enter choice [1-4]: ${NC}")" mirror_choice
+    if [ $? -ne 0 ]; then echo ""; fi # Handle timeout newline
+    mirror_choice=${mirror_choice:-1} # Default to SJTU
+    
+    case "$mirror_choice" in
+        1)
+            log "Using SJTU Mirror..."
+            exe flatpak remote-modify flathub --url=https://mirror.sjtu.edu.cn/flathub
+            ;;
+        2)
+            log "Using TUNA Mirror..."
+            exe flatpak remote-modify flathub --url=https://mirror.tuna.tsinghua.edu.cn/flathub
+            ;;
+        3)
+            log "Using USTC Mirror..."
+            exe flatpak remote-modify flathub --url=https://mirrors.ustc.edu.cn/flathub
+            ;;
+        4)
+            log "Using BFSU Mirror..."
+            exe flatpak remote-modify flathub --url=https://mirrors.bfsu.edu.cn/flathub
+            ;;
+        *)
+            log "Invalid choice. Defaulting to SJTU..."
+            exe flatpak remote-modify flathub --url=https://mirror.sjtu.edu.cn/flathub
+            ;;
+    esac
+
+    # Disable P2P for stability in CN
     exe flatpak remote-modify --no-p2p flathub
     
+    # Configure GOPROXY
     export GOPROXY=https://goproxy.cn,direct
     if ! grep -q "GOPROXY" /etc/environment; then echo "GOPROXY=https://goproxy.cn,direct" >> /etc/environment; fi
+    
+    # Configure Git Mirror
     exe runuser -u "$TARGET_USER" -- git config --global url."https://gitclone.com/github.com/".insteadOf "https://github.com/"
+    
     success "Optimizations Enabled."
 else
-    log "Using Global Sources."
+    log "Using Global Official Sources."
 fi
 
 # NOPASSWD for yay
@@ -128,6 +180,7 @@ if [ -f "$LIST_FILE" ]; then
             for git_pkg in "${GIT_LIST[@]}"; do
                 if ! exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
                     warn "Retrying $git_pkg..."
+                    # Toggle Mirror
                     if runuser -u "$TARGET_USER" -- git config --global --get url."https://gitclone.com/github.com/".insteadOf > /dev/null; then
                         runuser -u "$TARGET_USER" -- git config --global --unset url."https://gitclone.com/github.com/".insteadOf
                     else
@@ -173,7 +226,7 @@ if [ -d "$DOTFILES_SOURCE" ]; then
     log "Deploying KDE configurations..."
     
     BACKUP_NAME="config_backup_kde_$(date +%s).tar.gz"
-    log "Backing up ~/.config..."
+    log "Backing up ~/.config to $BACKUP_NAME..."
     exe runuser -u "$TARGET_USER" -- tar -czf "$HOME_DIR/$BACKUP_NAME" -C "$HOME_DIR" .config
     
     log "Copying files..."
@@ -181,7 +234,7 @@ if [ -d "$DOTFILES_SOURCE" ]; then
     
     success "KDE Dotfiles applied."
 else
-    warn "Folder 'kde-dotfiles' not found in repo. Skipping config."
+    warn "Folder 'kde-dotfiles' not found. Skipping config."
 fi
 
 # ------------------------------------------------------------------------------
@@ -197,12 +250,12 @@ if [ ! -d "$DESKTOP_DIR" ]; then
 fi
 
 if [ -f "$SOURCE_README" ]; then
-    log "Copying KDE-README.txt to Desktop..."
+    log "Copying KDE-README.txt..."
     exe cp "$SOURCE_README" "$DESKTOP_DIR/"
     exe chown "$TARGET_USER:$TARGET_USER" "$DESKTOP_DIR/KDE-README.txt"
     success "Readme deployed."
 else
-    warn "resources/KDE-README.txt not found. Skipping."
+    warn "resources/KDE-README.txt not found."
 fi
 
 # ------------------------------------------------------------------------------
