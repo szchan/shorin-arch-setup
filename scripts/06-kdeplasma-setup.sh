@@ -227,16 +227,26 @@ DOTFILES_SOURCE="$PARENT_DIR/kde-dotfiles"
 if [ -d "$DOTFILES_SOURCE" ]; then
     log "Deploying KDE configurations..."
     
+    # Backup .config
     BACKUP_NAME="config_backup_kde_$(date +%s).tar.gz"
     log "Backing up ~/.config to $BACKUP_NAME..."
     exe runuser -u "$TARGET_USER" -- tar -czf "$HOME_DIR/$BACKUP_NAME" -C "$HOME_DIR" .config
     
-    log "Copying files..."
-    exe runuser -u "$TARGET_USER" -- cp -rfT "$DOTFILES_SOURCE" "$HOME_DIR"
+    # [FIX] Use rsync for reliable merging (handling hidden files & deep nesting)
+    log "Copying files (using rsync)..."
+    # -a: archive mode (recursive + preserve attributes)
+    # -v: verbose
+    # Trailing slash on source ($DOTFILES_SOURCE/) is crucial: it means "copy contents of dir"
+    exe rsync -av "$DOTFILES_SOURCE/" "$HOME_DIR/"
+    
+    # Force fix ownership just in case rsync preserved root ownership from the installer environment
+    log "Fixing permissions..."
+    exe chown -R "$TARGET_USER:$TARGET_USER" "$HOME_DIR/.config"
+    exe chown -R "$TARGET_USER:$TARGET_USER" "$HOME_DIR/.local"
     
     success "KDE Dotfiles applied."
 else
-    warn "Folder 'kde-dotfiles' not found. Skipping config."
+    warn "Folder 'kde-dotfiles' not found in repo. Skipping config."
 fi
 
 # ------------------------------------------------------------------------------
