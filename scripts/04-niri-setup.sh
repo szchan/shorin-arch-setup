@@ -128,12 +128,9 @@ exe flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flath
 
 CURRENT_TZ=$(readlink -f /etc/localtime)
 IS_CN_ENV=false
-if [ "$CN_MIRROR" == "1" ] || [ "$DEBUG" == "1" ]; then
 
 if [[ "$CURRENT_TZ" == *"Shanghai"* ]]; then
     IS_CN_ENV=true
-    if [ "$DEBUG" == "1" ]; then warn "DEBUG MODE ACTIVE"; fi
-    
     info_kv "Region" "China (Timezone)"
 elif [ "$CN_MIRROR" == "1" ]; then
     IS_CN_ENV=true
@@ -245,8 +242,6 @@ if [ -f "$LIST_FILE" ]; then
         if [ ${#GIT_LIST[@]} -gt 0 ]; then
             log "Git Install..."
             for git_pkg in "${GIT_LIST[@]}"; do
-                if ! exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
-                    warn "Retrying $git_pkg..."
                 # --- 新逻辑：CN 环境本地优先 ---
                 if [ "$IS_CN_ENV" = true ]; then
                     log "Attempting local install for '$git_pkg'..."
@@ -270,10 +265,6 @@ if [ -f "$LIST_FILE" ]; then
                     else
                         runuser -u "$TARGET_USER" -- git config --global url."https://gitclone.com/github.com/".insteadOf "https://github.com/"
                     fi
-                    if ! exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
-                        warn "Checking local cache..."
-                        if install_local_fallback "$git_pkg"; then :; else
-                            error "Failed: $git_pkg"
 
                     if exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
                         success "Installed $git_pkg (on retry)."
@@ -292,11 +283,7 @@ if [ -f "$LIST_FILE" ]; then
                             error "Failed to install '$git_pkg' after all attempts."
                             FAILED_PACKAGES+=("$git_pkg")
                         fi
-                    else
-                        success "Installed $git_pkg"
                     fi
-                else
-                    success "Installed $git_pkg"
                 fi
             done
         fi
