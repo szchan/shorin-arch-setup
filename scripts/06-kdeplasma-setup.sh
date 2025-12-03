@@ -24,7 +24,6 @@ install_local_fallback() {
 
         # [FIX] First, install dependencies from the local package's metadata
         log "Resolving dependencies for local package..."
-        # Extract dependency list from the .PKGINFO file inside the tarball
         local deps=$(tar -xOf "$pkg_file" .PKGINFO | grep -E '^depend' | cut -d '=' -f 2 | xargs)
         
         if [ -n "$deps" ]; then
@@ -63,7 +62,8 @@ info_kv "Target" "$TARGET_USER"
 section "Step 1/5" "Plasma Core"
 
 log "Installing KDE Plasma Meta & Apps..."
-KDE_PKGS="plasma-meta konsole dolphin kate firefox qt6-multimedia-ffmpeg pipewire-jack"
+# sddm is usually pulled by plasma-meta, but ensuring sddm package explicitly is good practice
+KDE_PKGS="plasma-meta konsole dolphin kate firefox qt6-multimedia-ffmpeg pipewire-jack sddm"
 exe pacman -Syu --noconfirm --needed $KDE_PKGS
 success "KDE Plasma installed."
 
@@ -96,17 +96,13 @@ fi
 if [ "$IS_CN_ENV" = true ]; then
     log "Enabling China Optimizations..."
     
-    # 调用通用函数来选择镜像
     select_flathub_mirror
 
-    # Disable P2P for stability in CN
     exe flatpak remote-modify --no-p2p flathub
     
-    # Configure GOPROXY
     export GOPROXY=https://goproxy.cn,direct
     if ! grep -q "GOPROXY" /etc/environment; then echo "GOPROXY=https://goproxy.cn,direct" >> /etc/environment; fi
     
-    # Configure Git Mirror
     exe runuser -u "$TARGET_USER" -- git config --global url."https://gitclone.com/github.com/".insteadOf "https://github.com/"
     
     success "Optimizations Enabled."
@@ -158,23 +154,17 @@ if [ -f "$LIST_FILE" ]; then
         if [ ${#GIT_LIST[@]} -gt 0 ]; then
             log "Git Install..."
             for git_pkg in "${GIT_LIST[@]}"; do
-                # --- 新逻辑：CN 环境本地优先 ---
                 if [ "$IS_CN_ENV" = true ]; then
                     log "Attempting local install for '$git_pkg'..."
                     if install_local_fallback "$git_pkg"; then
                         success "Installed $git_pkg from local cache."
-                        continue # 安装成功，跳过网络安装
-                    else
-                        log "Local package not found. Proceeding with network install..."
+                        continue
                     fi
                 fi
 
-                # --- 标准网络安装流程 (作为回退或默认) ---
-                # 尝试 1: 正常网络安装
                 if exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
                     success "Installed $git_pkg"
                 else
-                    # 尝试 2: 切换镜像后重试
                     warn "Network install failed for $git_pkg. Retrying with mirror toggle..."
                     if runuser -u "$TARGET_USER" -- git config --global --get url."https://gitclone.com/github.com/".insteadOf > /dev/null; then
                         runuser -u "$TARGET_USER" -- git config --global --unset url."https://gitclone.com/github.com/".insteadOf
@@ -185,7 +175,6 @@ if [ -f "$LIST_FILE" ]; then
                     if exe runuser -u "$TARGET_USER" -- env GOPROXY=$GOPROXY yay -Syu --noconfirm --needed --answerdiff=None --answerclean=None "$git_pkg"; then
                         success "Installed $git_pkg (on retry)."
                     else
-                        # 尝试 3: 如果不是CN环境，最后尝试本地回退
                         if [ "$IS_CN_ENV" = false ]; then
                             warn "Final attempt: Checking local cache for $git_pkg..."
                             if install_local_fallback "$git_pkg"; then
@@ -195,7 +184,6 @@ if [ -f "$LIST_FILE" ]; then
                                 FAILED_PACKAGES+=("$git_pkg")
                             fi
                         else
-                            # CN环境下，本地安装已在最开始尝试过
                             error "Failed to install '$git_pkg' after all attempts."
                             FAILED_PACKAGES+=("$git_pkg")
                         fi
@@ -218,7 +206,7 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 4. Dotfiles Deployment
+# 4. Dotfiles Deployment (FIXED)
 # ------------------------------------------------------------------------------
 section "Step 4/5" "KDE Config Deployment"
 
@@ -227,24 +215,46 @@ DOTFILES_SOURCE="$PARENT_DIR/kde-dotfiles"
 if [ -d "$DOTFILES_SOURCE" ]; then
     log "Deploying KDE configurations..."
     
-    # Backup .config
+    # 1. Backup Existing .config
     BACKUP_NAME="config_backup_kde_$(date +%s).tar.gz"
-    log "Backing up ~/.config to $BACKUP_NAME..."
-    exe runuser -u "$TARGET_USER" -- tar -czf "$HOME_DIR/$BACKUP_NAME" -C "$HOME_DIR" .config
+    if [ -d "$HOME_DIR/.config" ]; then
+        log "Backing up ~/.config to $BACKUP_NAME..."
+        exe runuser -u "$TARGET_USER" -- tar -czf "$HOME_DIR/$BACKUP_NAME" -C "$HOME_DIR" .config
+    fi
     
-    # [FIX] Use rsync for reliable merging (handling hidden files & deep nesting)
-    log "Copying files (using rsync)..."
-    # -a: archive mode (recursive + preserve attributes)
-    # -v: verbose
-    # Trailing slash on source ($DOTFILES_SOURCE/) is crucial: it means "copy contents of dir"
-    exe rsync -av "$DOTFILES_SOURCE/" "$HOME_DIR/"
+    # 2. Explicitly Copy .config and .local
+    # Using cp -rf checks specifically for the folders to ensure correct merging structure
     
-    # Force fix ownership just in case rsync preserved root ownership from the installer environment
-    log "Fixing permissions..."
-    exe chown -R "$TARGET_USER:$TARGET_USER" "$HOME_DIR/.config"
-    exe chown -R "$TARGET_USER:$TARGET_USER" "$HOME_DIR/.local"
+    # --- Process .config ---
+    if [ -d "$DOTFILES_SOURCE/.config" ]; then
+        log "Merging .config..."
+        # Create target if not exists (owned by user later)
+        if [ ! -d "$HOME_DIR/.config" ]; then 
+            mkdir -p "$HOME_DIR/.config"
+        fi
+        # Copy contents recursively and force overwrite
+        exe cp -rf "$DOTFILES_SOURCE/.config/"* "$HOME_DIR/.config/" 2>/dev/null || true
+        # Also catch hidden files inside .config if any (shell glob trick)
+        exe cp -rf "$DOTFILES_SOURCE/.config/." "$HOME_DIR/.config/" 2>/dev/null || true
+        
+        log "Fixing permissions for .config..."
+        exe chown -R "$TARGET_USER:$TARGET_USER" "$HOME_DIR/.config"
+    fi
+
+    # --- Process .local ---
+    if [ -d "$DOTFILES_SOURCE/.local" ]; then
+        log "Merging .local..."
+        if [ ! -d "$HOME_DIR/.local" ]; then 
+            mkdir -p "$HOME_DIR/.local"
+        fi
+        exe cp -rf "$DOTFILES_SOURCE/.local/"* "$HOME_DIR/.local/" 2>/dev/null || true
+        exe cp -rf "$DOTFILES_SOURCE/.local/." "$HOME_DIR/.local/" 2>/dev/null || true
+        
+        log "Fixing permissions for .local..."
+        exe chown -R "$TARGET_USER:$TARGET_USER" "$HOME_DIR/.local"
+    fi
     
-    success "KDE Dotfiles applied."
+    success "KDE Dotfiles applied and permissions fixed."
 else
     warn "Folder 'kde-dotfiles' not found in repo. Skipping config."
 fi
@@ -271,13 +281,24 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 5. Enable SDDM
+# 5. Configure & Enable SDDM (FIXED)
 # ------------------------------------------------------------------------------
-section "Step 5/5" "Enable Display Manager"
+section "Step 5/5" "Configure Display Manager"
 
-log "Enabling SDDM..."
+log "Configuring SDDM Theme to Breeze..."
+# Create configuration directory
+exe mkdir -p /etc/sddm.conf.d
+
+# Write configuration file to set theme
+cat > /etc/sddm.conf.d/theme.conf <<EOF
+[Theme]
+Current=breeze
+EOF
+log "Theme set to 'breeze'."
+
+log "Enabling SDDM Service..."
 exe systemctl enable sddm
-success "SDDM enabled. Will start on reboot."
+success "SDDM configured and enabled."
 
 # ------------------------------------------------------------------------------
 # Cleanup

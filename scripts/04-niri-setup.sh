@@ -272,9 +272,7 @@ if [ -f "$LIST_FILE" ]; then
             warn "Waybar missing. Installing stock..."
             exe pacman -Syu --noconfirm --needed waybar
         fi
-        if ! runuser -u "$TARGET_USER" -- command -v awww &> /dev/null; then
-            warn "Awww not found. Will try Swaybg later."
-        fi
+
         if [ ${#FAILED_PACKAGES[@]} -gt 0 ]; then
             DOCS_DIR="$HOME_DIR/Documents"
             REPORT_FILE="$DOCS_DIR/安装失败的软件.txt"
@@ -328,17 +326,6 @@ if [ -d "$TEMP_DIR/dotfiles" ]; then
                 RM_PATH="$HOME_DIR/.config/$item"
                 if [ -d "$RM_PATH" ]; then exe rm -rf "$RM_PATH"; fi
             done
-        fi
-    fi
-
-    # Ultimate Fallback
-    if ! runuser -u "$TARGET_USER" -- command -v awww &> /dev/null; then
-        warn "Awww missing. Switching to Swaybg..."
-        exe pacman -Syu --noconfirm --needed swaybg
-        SCRIPT_PATH="$HOME_DIR/.config/scripts/niri_set_overview_blur_dark_bg.sh"
-        if [ -f "$SCRIPT_PATH" ]; then
-            sed -i 's/^WALLPAPER_BACKEND="awww"/WALLPAPER_BACKEND="swaybg"/' "$SCRIPT_PATH"
-            success "Switched to Swaybg."
         fi
     fi
 else

@@ -156,68 +156,125 @@ exe_silent() {
 
 # 动态选择 Flathub 镜像源
 select_flathub_mirror() {
-    # 定义镜像列表：[显示名称]="URL"
-    # [FIX] 将颜色代码移出 key，避免影响长度计算
-    declare -A mirrors=(
-        ["SJTU (Shanghai Jiao Tong) - Recommended"]="https://mirror.sjtu.edu.cn/flathub"
-        ["TUNA (Tsinghua University)"]="https://mirror.tuna.tsinghua.edu.cn/flathub"
-        ["USTC (Univ of Sci & Tech of China)"]="https://mirrors.ustc.edu.cn/flathub"
-        ["BFSU (Beijing Foreign Studies Univ)"]="https://mirrors.bfsu.edu.cn/flathub"
-        ["Flathub Official (Global)"]="https://dl.flathub.org/repo/flathub.flatpakrepo"
+    # 1. 使用普通数组以保证顺序 (索引数组)
+    local names=(
+        "SJTU (Shanghai Jiao Tong)"
+        "TUNA (Tsinghua University)"
+        "USTC (Univ of Sci & Tech of China)"
+        "BFSU (Beijing Foreign Studies Univ)"
+        "Flathub Official (Global)"
     )
-    local mirror_keys=("${!mirrors[@]}")
-
-    # --- 动态计算菜单宽度 ---
-    local max_len=0
-    for key in "${mirror_keys[@]}"; do
-        # 去除颜色代码计算真实长度
-        local clean_key=$(echo "$key" | sed 's/ - Recommended//')
-        if (( ${#clean_key} > max_len )); then
-            max_len=${#clean_key}
-        fi
-    done
-    # 加上 "[x] " 和 " - Recommended" 的长度
-    local content_width=$((max_len + 4 + 14)) 
-    local title_text="Select Flathub Mirror (Timeout 60s -> Default SJTU)"
-    local title_padding=$((content_width - ${#title_text}))
-
-    # --- 动态生成菜单 ---
-    echo ""
-    printf "${H_PURPLE}╭─%s─╮${NC}\n" "$(printf '─%.0s' $(seq 1 $((content_width + 2))))"
-    printf "${H_PURPLE}│${NC} ${BOLD}%s${NC}%*s ${H_PURPLE}│${NC}\n" "$title_text" "$title_padding" ""
-    printf "${H_PURPLE}├─%s─┤${NC}\n" "$(printf '─%.0s' $(seq 1 $((content_width + 2))))"
     
-    for i in "${!mirror_keys[@]}"; do
-        local key="${mirror_keys[$i]}"
-        local line
-        # [FIX] 先格式化，再用 echo -e 渲染颜色，保证对齐
-        if [[ "$key" == *"Recommended"* ]]; then
-            line=$(printf " [%d] %s" "$((i+1))" "${key/ - Recommended/}")
-            line="${line} - ${H_GREEN}Recommended${NC}"
-        else
-            line=$(printf " [%d] %s" "$((i+1))" "$key")
+    local urls=(
+        "https://mirror.sjtu.edu.cn/flathub"
+        "https://mirror.tuna.tsinghua.edu.cn/flathub"
+        "https://mirrors.ustc.edu.cn/flathub"
+        "https://mirrors.bfsu.edu.cn/flathub"
+        "https://dl.flathub.org/repo/flathub.flatpakrepo"
+    )
+
+    # 2. 动态计算菜单宽度
+    local max_len=0
+    local title_text="Select Flathub Mirror (60s Timeout)"
+    
+    # 基础长度至少要能放下标题
+    max_len=${#title_text}
+
+    # 遍历找出最长选项
+    for name in "${names[@]}"; do
+        # 预估显示长度："[x] Name - Recommended"
+        local item_len=$((${#name} + 4 + 14)) 
+        if (( item_len > max_len )); then
+            max_len=$item_len
         fi
-        
-        local clean_line=$(echo -e "$line" | sed 's/\x1b\[[0-9;]*m//g')
-        local padding=$((content_width - ${#clean_line}))
-        echo -e "${H_PURPLE}│${NC}${H_CYAN}${line}${NC}%*s ${H_PURPLE}│${NC}" "$padding" ""
     done
 
-    printf "${H_PURPLE}╰─%s─╯${NC}\n" "$(printf '─%.0s' $(seq 1 $((content_width + 2))))"
+    # 增加一点内边距
+    local menu_width=$((max_len + 4))
+
+    # 定义边框生成函数
+    draw_border() {
+        local type=$1
+        local width=$2
+        local line=""
+        # 生成指定长度的横线
+        printf -v line "%*s" "$width" ""
+        line=${line// /─}
+        
+        case $type in
+            top)    printf "${H_PURPLE}╭%s╮${NC}\n" "$line" ;;
+            mid)    printf "${H_PURPLE}├%s┤${NC}\n" "$line" ;;
+            bot)    printf "${H_PURPLE}╰%s╯${NC}\n" "$line" ;;
+        esac
+    }
+
+    # --- 3. 渲染菜单 ---
+    echo ""
+    draw_border "top" "$menu_width"
+
+    # 打印标题 (居中算法)
+    local title_padding_len=$(( (menu_width - ${#title_text}) / 2 ))
+    printf "${H_PURPLE}│${NC}%*s${BOLD}%s${NC}%*s${H_PURPLE}│${NC}\n" \
+        $title_padding_len "" \
+        "$title_text" \
+        $((menu_width - ${#title_text} - title_padding_len)) ""
+
+    draw_border "mid" "$menu_width"
+
+    # 打印选项
+    for i in "${!names[@]}"; do
+        local name="${names[$i]}"
+        local display_idx=$((i+1))
+        local display_str=""
+        
+        # 构造显示字符串（先不加颜色，用于计算填充）
+        local raw_str=" [$display_idx] $name"
+        
+        # 构造实际输出字符串（带颜色）
+        local color_str=""
+        
+        # 逻辑：如果是第一个(SJTU)，标记为推荐
+        if [ "$i" -eq 0 ]; then
+            raw_str="${raw_str} - Recommended"
+            color_str=" ${H_CYAN}[$display_idx]${NC} ${name} - ${H_GREEN}Recommended${NC}"
+        else
+            color_str=" ${H_CYAN}[$display_idx]${NC} ${name}"
+        fi
+
+        # 计算右侧填充空格数
+        local padding=$((menu_width - ${#raw_str}))
+        
+        # 打印行：左边框 + 内容 + 填充空格 + 右边框
+        # 注意：这里 printf 只负责打印空格填充，内容直接作为变量插入
+        printf "${H_PURPLE}│${NC}%s%*s${H_PURPLE}│${NC}\n" "$color_str" "$padding" ""
+    done
+
+    draw_border "bot" "$menu_width"
     echo ""
 
+    # --- 4. 用户交互 ---
     local choice
-    read -t 60 -p "$(echo -e "   ${H_YELLOW}Enter choice [1-${#mirror_keys[@]}]: ${NC}")" choice
-    if [ $? -ne 0 ]; then echo ""; fi
+    read -t 60 -p "$(echo -e "   ${H_YELLOW}Enter choice [1-${#names[@]}]: ${NC}")" choice
+    if [ $? -ne 0 ]; then echo ""; fi # 处理超时换行
     choice=${choice:-1}
     
-    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#mirror_keys[@]}" ]; then
-        log "Invalid choice. Defaulting to SJTU..."
+    # 校验输入
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#names[@]}" ]; then
+        log "Invalid choice or timeout. Defaulting to SJTU..."
         choice=1
     fi
 
-    local selected_key="${mirror_keys[$((choice-1))]}"
-    local selected_url="${mirrors[$selected_key]}"
-    log "Using $(echo "${selected_key}" | sed 's/ - Recommended//') Mirror..."
-    exe flatpak remote-modify flathub --url="$selected_url"
+    # 获取结果
+    local index=$((choice-1))
+    local selected_name="${names[$index]}"
+    local selected_url="${urls[$index]}"
+
+    log "Setting Flathub mirror to: ${H_GREEN}$selected_name${NC}"
+    
+    # 执行修改
+    if exe flatpak remote-modify flathub --url="$selected_url"; then
+        success "Mirror updated."
+    else
+        error "Failed to update mirror."
+    fi
 }
