@@ -151,3 +151,49 @@ exe() {
 exe_silent() {
     "$@" > /dev/null 2>&1
 }
+
+# --- 5. 可复用逻辑块 ---
+
+# 动态选择 Flathub 镜像源
+select_flathub_mirror() {
+    # 定义镜像列表：[显示名称]="URL"
+    declare -A mirrors=(
+        ["SJTU (Shanghai Jiao Tong) - ${H_GREEN}Recommended${NC}"]="https://mirror.sjtu.edu.cn/flathub"
+        ["TUNA (Tsinghua University)"]="https://mirror.tuna.tsinghua.edu.cn/flathub"
+        ["USTC (Univ of Sci & Tech of China)"]="https://mirrors.ustc.edu.cn/flathub"
+        ["BFSU (Beijing Foreign Studies Univ)"]="https://mirrors.bfsu.edu.cn/flathub"
+    )
+    local mirror_keys=("${!mirrors[@]}")
+
+    echo ""
+    echo -e "${H_PURPLE}╭──────────────────────────────────────────────────────────────────╮${NC}"
+    echo -e "${H_PURPLE}│${NC} ${BOLD}Select Flathub Mirror (Timeout 60s -> Default SJTU)${NC}              ${H_PURPLE}│${NC}"
+    echo -e "${H_PURPLE}├──────────────────────────────────────────────────────────────────┤${NC}"
+    
+    for i in "${!mirror_keys[@]}"; do
+        # 使用 printf 格式化输出，确保对齐
+        printf "${H_PURPLE}│${NC} ${H_CYAN}[%d]${NC} %-62s ${H_PURPLE}│${NC}\n" "$((i+1))" "${mirror_keys[$i]}"
+    done
+
+    echo -e "${H_PURPLE}╰──────────────────────────────────────────────────────────────────╯${NC}"
+    echo ""
+
+    local choice
+    read -t 60 -p "$(echo -e "   ${H_YELLOW}Enter choice [1-${#mirror_keys[@]}]: ${NC}")" choice
+    # 处理超时后换行
+    if [ $? -ne 0 ]; then echo ""; fi
+
+    # 默认选项为 1 (SJTU)
+    choice=${choice:-1}
+    
+    # 验证输入是否为有效数字，否则使用默认值
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#mirror_keys[@]}" ]; then
+        log "Invalid choice. Defaulting to SJTU..."
+        choice=1
+    fi
+
+    local selected_key="${mirror_keys[$((choice-1))]}"
+    local selected_url="${mirrors[$selected_key]}"
+    log "Using ${selected_key%% *} Mirror..."
+    exe flatpak remote-modify flathub --url="$selected_url"
+}

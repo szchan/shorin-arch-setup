@@ -158,47 +158,8 @@ fi
 if [ "$IS_CN_ENV" = true ]; then
     log "Enabling China Optimizations..."
     
-    # --- [NEW] Flathub Mirror Menu ---
-    echo ""
-    echo -e "${H_PURPLE}╭──────────────────────────────────────────────────────────────╮${NC}"
-    echo -e "${H_PURPLE}│${NC} ${BOLD}Select Flathub Mirror (Timeout 60s -> Default SJTU)${NC}          ${H_PURPLE}│${NC}"
-    echo -e "${H_PURPLE}├──────────────────────────────────────────────────────────────┤${NC}"
-    echo -e "${H_PURPLE}│${NC} ${H_CYAN}[1]${NC} SJTU (Shanghai Jiao Tong) - ${H_GREEN}Recommended${NC}                ${H_PURPLE}│${NC}"
-    echo -e "${H_PURPLE}│${NC} ${H_CYAN}[2]${NC} TUNA (Tsinghua University)                               ${H_PURPLE}│${NC}"
-    echo -e "${H_PURPLE}│${NC} ${H_CYAN}[3]${NC} USTC (Univ of Sci & Tech of China)                       ${H_PURPLE}│${NC}"
-    echo -e "${H_PURPLE}│${NC} ${H_CYAN}[4]${NC} BFSU (Beijing Foreign Studies Univ)                      ${H_PURPLE}│${NC}"
-    echo -e "${H_PURPLE}╰──────────────────────────────────────────────────────────────╯${NC}"
-    echo ""
-    
-    read -t 60 -p "$(echo -e "   ${H_YELLOW}Enter choice [1-4]: ${NC}")" mirror_choice
-    if [ $? -ne 0 ]; then echo ""; fi # Handle timeout newline
-    mirror_choice=${mirror_choice:-1} # Default to SJTU
-
-    # [FIX] Trim whitespace/newlines from user input to ensure case matching
-    mirror_choice=$(echo "$mirror_choice" | xargs)
-    
-    case "$mirror_choice" in
-        1)
-            log "Using SJTU Mirror..."
-            exe flatpak remote-modify flathub --url=https://mirror.sjtu.edu.cn/flathub
-            ;;
-        2)
-            log "Using TUNA Mirror..."
-            exe flatpak remote-modify flathub --url=https://mirror.tuna.tsinghua.edu.cn/flathub
-            ;;
-        3)
-            log "Using USTC Mirror..."
-            exe flatpak remote-modify flathub --url=https://mirrors.ustc.edu.cn/flathub
-            ;;
-        4)
-            log "Using BFSU Mirror..."
-            exe flatpak remote-modify flathub --url=https://mirrors.bfsu.edu.cn/flathub
-            ;;
-        *)
-            log "Invalid choice. Defaulting to SJTU..."
-            exe flatpak remote-modify flathub --url=https://mirror.sjtu.edu.cn/flathub
-            ;;
-    esac
+    # 调用通用函数来选择镜像
+    select_flathub_mirror
     
     # Disable P2P for stability
     exe flatpak remote-modify --no-p2p flathub
